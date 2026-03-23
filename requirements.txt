@@ -1,0 +1,10 @@
+streamlit
+matplotlib
+pandas
+numpy
+Pillow
+Evtx
+pyttsx3
+speechrecognition
+pyaudio
+pywin32

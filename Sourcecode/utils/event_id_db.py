@@ -1,0 +1,507 @@
+"""
+Windows Event ID Knowledge Base.
+Maps Event IDs to their description, what action triggers them,
+what effect/risk an unusual spike implies, and how to resolve it.
+"""
+
+EVENT_ID_INFO = {
+    # ── Security Log ──
+    "4624": {
+        "name": "Successful Logon",
+        "action": "A user account was successfully logged on to the system.",
+        "effect": "A spike may indicate automated logon attempts, pass-the-hash attacks, or lateral movement across the network.",
+        "severity": "Medium",
+        "mitre": "T1078 – Valid Accounts",
+        "remediation": [
+            "Review logon source IPs and correlate with known endpoints",
+            "Check for logon type 3 (network) or type 10 (remote) from unusual sources",
+            "Enable Network Level Authentication (NLA) for RDP",
+            "Enforce MFA on all remote access and privileged accounts",
+            "Run: `Get-WinEvent -FilterHashtable @{LogName='Security';Id=4624} | Select -First 50` to inspect recent logons",
+        ],
+    },
+    "4625": {
+        "name": "Failed Logon Attempt",
+        "action": "An account failed to log on due to incorrect credentials.",
+        "effect": "A spike strongly indicates brute-force or password-spray attacks targeting local or domain accounts.",
+        "severity": "High",
+        "mitre": "T1110 – Brute Force",
+        "remediation": [
+            "Identify the source IP and block it at the firewall if external",
+            "Set account lockout policy: lockout after 5 failed attempts for 30 minutes",
+            "Run: `net accounts /lockoutthreshold:5 /lockoutduration:30 /lockoutwindow:30`",
+            "Enforce MFA on all accounts targeted by the brute-force",
+            "Check if targeted accounts are service accounts with weak/default passwords",
+        ],
+    },
+    "4634": {
+        "name": "Account Logoff",
+        "action": "A logon session was terminated (user logged off).",
+        "effect": "A spike paired with 4624 spikes may indicate rapid automated session cycling, common in credential harvesting.",
+        "severity": "Low",
+        "mitre": "N/A",
+        "remediation": [
+            "Cross-reference with EID 4624 events to identify rapid logon-logoff cycling",
+            "Investigate the user accounts involved for compromise indicators",
+            "Check for automated scripts or tools creating short-lived sessions",
+        ],
+    },
+    "4648": {
+        "name": "Explicit Credential Logon",
+        "action": "A logon was attempted using explicit credentials (RunAs or network credential).",
+        "effect": "A spike may indicate credential theft or lateral movement where an attacker uses stolen credentials.",
+        "severity": "High",
+        "mitre": "T1078 – Valid Accounts",
+        "remediation": [
+            "Audit which accounts are being used with RunAs — check if authorized",
+            "Rotate passwords for any accounts flagged in these events immediately",
+            "Deploy Credential Guard: `Enable-WindowsOptionalFeature -Online -FeatureName Windows-Defender-CredentialGuard`",
+            "Restrict 'Log on as a batch job' and 'Log on as a service' to required accounts only",
+        ],
+    },
+    "4656": {
+        "name": "Object Handle Requested",
+        "action": "A handle to an object (file, registry key, kernel object) was requested.",
+        "effect": "A spike may indicate mass file enumeration, data exfiltration scanning, or malware probing system resources.",
+        "severity": "Medium",
+        "mitre": "T1083 – File and Directory Discovery",
+        "remediation": [
+            "Identify which objects are being accessed and by which process/user",
+            "Apply least-privilege NTFS permissions on sensitive directories",
+            "Enable File Integrity Monitoring (FIM) on critical system folders",
+            "Run: `Get-WinEvent -FilterHashtable @{LogName='Security';Id=4656} | Select -First 20` to inspect targets",
+        ],
+    },
+    "4663": {
+        "name": "Object Access Attempt",
+        "action": "An attempt was made to access an object (read/write/delete).",
+        "effect": "A spike often indicates bulk file access — could signal data exfiltration, ransomware encryption, or unauthorized data harvesting.",
+        "severity": "High",
+        "mitre": "T1005 – Data from Local System",
+        "remediation": [
+            "URGENT: Check if files are being encrypted (ransomware indicator)",
+            "Identify the process making bulk accesses and kill it if suspicious",
+            "Run: `tasklist /v` and `wmic process list brief` to find unusual processes",
+            "Enable Controlled Folder Access: Settings → Windows Security → Ransomware Protection",
+            "Isolate the machine from the network if active exfiltration is suspected",
+        ],
+    },
+    "4670": {
+        "name": "Object Permissions Changed",
+        "action": "Permissions on an object were changed.",
+        "effect": "A spike may indicate an attacker modifying ACLs to gain persistent access to sensitive files or registry keys.",
+        "severity": "High",
+        "mitre": "T1222 – File and Directory Permissions Modification",
+        "remediation": [
+            "Audit which files/folders had permissions changed and revert unauthorized modifications",
+            "Run: `icacls C:\\SensitiveFolder /verify` to check for permission anomalies",
+            "Restrict who can modify ACLs with Group Policy (Computer Config → Security Settings)",
+            "Enable auditing on critical folders to catch future tampering",
+        ],
+    },
+    "4672": {
+        "name": "Special Privileges Assigned",
+        "action": "Special privileges (e.g., SeDebugPrivilege) were assigned to a new logon.",
+        "effect": "A spike indicates repeated privileged logons — potential privilege escalation or admin-level lateral movement.",
+        "severity": "High",
+        "mitre": "T1134 – Access Token Manipulation",
+        "remediation": [
+            "Identify which accounts received special privileges and verify authorization",
+            "Remove unnecessary admin privileges — apply Least Privilege principle",
+            "Restrict SeDebugPrivilege to only essential service accounts via Group Policy",
+            "Run: `whoami /priv` on suspected machines to audit active privilege assignments",
+        ],
+    },
+    "4688": {
+        "name": "New Process Created",
+        "action": "A new process has been created on the system.",
+        "effect": "A spike may indicate rapid script execution, malware spawning child processes, or automated reconnaissance commands.",
+        "severity": "Medium",
+        "mitre": "T1059 – Command and Scripting Interpreter",
+        "remediation": [
+            "Review parent-child process relationships for suspicious chains (e.g., Word → cmd → PowerShell)",
+            "Enable command-line auditing in process creation events (GPO: Audit Process Creation)",
+            "Create AppLocker or WDAC rules to block unauthorized executables",
+            "Run: `Get-WinEvent -FilterHashtable @{LogName='Security';Id=4688} | Select -First 20` to review",
+        ],
+    },
+    "4689": {
+        "name": "Process Terminated",
+        "action": "A process has exited.",
+        "effect": "A spike paired with 4688 spikes indicates rapid process churn — common in script-based attacks or kill-chain execution.",
+        "severity": "Low",
+        "mitre": "N/A",
+        "remediation": [
+            "Correlate with EID 4688 to find short-lived processes (possible living-off-the-land binaries)",
+            "Investigate processes that lived < 2 seconds — common indicator of reconnaissance scripts",
+        ],
+    },
+    "4698": {
+        "name": "Scheduled Task Created",
+        "action": "A scheduled task was created.",
+        "effect": "A spike indicates mass persistence setup — an attacker creating multiple scheduled tasks to survive reboots.",
+        "severity": "Critical",
+        "mitre": "T1053 – Scheduled Task/Job",
+        "remediation": [
+            "IMMEDIATE: List all tasks and identify unauthorized ones",
+            "Run: `schtasks /query /fo LIST /v` to enumerate all scheduled tasks",
+            "Delete suspicious tasks: `schtasks /delete /tn \"TaskName\" /f`",
+            "Restrict task creation with GPO: User Rights Assignment → 'Log on as a batch job'",
+            "Monitor the Task Scheduler operational log for future unauthorized task creation",
+        ],
+    },
+    "4702": {
+        "name": "Scheduled Task Updated",
+        "action": "A scheduled task was updated/modified.",
+        "effect": "A spike may indicate an attacker modifying existing tasks to inject malicious commands into legitimate scheduled jobs.",
+        "severity": "High",
+        "mitre": "T1053 – Scheduled Task/Job",
+        "remediation": [
+            "Compare current task definitions against known-good baselines",
+            "Run: `schtasks /query /tn \"TaskName\" /fo LIST /v` for each modified task",
+            "Check the 'Actions' field for any obfuscated or suspicious command lines",
+            "Revert tampered tasks to their original configuration",
+        ],
+    },
+    "4720": {
+        "name": "User Account Created",
+        "action": "A new user account was created.",
+        "effect": "A spike indicates mass account creation — typical of an attacker establishing backdoor accounts for persistent access.",
+        "severity": "Critical",
+        "mitre": "T1136 – Create Account",
+        "remediation": [
+            "IMMEDIATE: List all users and identify unauthorized accounts",
+            "Run: `net user` and `Get-LocalUser` to enumerate accounts",
+            "Delete rogue accounts: `net user <username> /delete`",
+            "Restrict account creation privileges — only Domain Admins should create accounts",
+            "Enable alerts on EID 4720 in your SIEM for real-time notification",
+        ],
+    },
+    "4722": {
+        "name": "User Account Enabled",
+        "action": "A user account was enabled.",
+        "effect": "A spike may indicate an attacker enabling previously disabled accounts to use as backdoors.",
+        "severity": "High",
+        "mitre": "T1098 – Account Manipulation",
+        "remediation": [
+            "Identify which accounts were enabled and by whom",
+            "Disable any accounts that should not be active: `net user <username> /active:no`",
+            "Audit disabled account list regularly for unauthorized re-activation",
+        ],
+    },
+    "4732": {
+        "name": "Member Added to Local Group",
+        "action": "A member was added to a security-enabled local group.",
+        "effect": "A spike indicates mass group membership changes — potential privilege escalation by adding accounts to admin groups.",
+        "severity": "Critical",
+        "mitre": "T1098 – Account Manipulation",
+        "remediation": [
+            "IMMEDIATE: Audit Administrators group membership",
+            "Run: `net localgroup Administrators` to list current members",
+            "Remove unauthorized members: `net localgroup Administrators <user> /delete`",
+            "Enable Restricted Groups via GPO to enforce group membership baselines",
+        ],
+    },
+    "4768": {
+        "name": "Kerberos TGT Requested",
+        "action": "A Kerberos authentication ticket (TGT) was requested.",
+        "effect": "A spike may indicate Kerberoasting or AS-REP roasting attacks attempting to harvest service ticket hashes.",
+        "severity": "High",
+        "mitre": "T1558 – Steal or Forge Kerberos Tickets",
+        "remediation": [
+            "Identify accounts requesting excessive TGTs",
+            "Ensure all service accounts use strong (25+ character) passwords",
+            "Enable AES encryption for Kerberos and disable RC4 where possible",
+            "Use Group Managed Service Accounts (gMSA) for service accounts",
+        ],
+    },
+    "4769": {
+        "name": "Kerberos Service Ticket Requested",
+        "action": "A Kerberos service ticket (TGS) was requested.",
+        "effect": "A spike strongly indicates Kerberoasting — an attacker requesting service tickets to crack offline.",
+        "severity": "High",
+        "mitre": "T1558.003 – Kerberoasting",
+        "remediation": [
+            "Identify which SPNs the tickets were requested for",
+            "Rotate passwords for all service accounts whose tickets were requested",
+            "Set service account passwords to 25+ random characters",
+            "Deploy Managed Service Accounts to auto-rotate credentials",
+            "Run: `Get-ADUser -Filter {ServicePrincipalName -ne '$null'} -Properties ServicePrincipalName` to audit SPNs",
+        ],
+    },
+    "4771": {
+        "name": "Kerberos Pre-Auth Failed",
+        "action": "Kerberos pre-authentication failed.",
+        "effect": "A spike indicates password spray or brute-force attacks against Active Directory accounts.",
+        "severity": "High",
+        "mitre": "T1110 – Brute Force",
+        "remediation": [
+            "Block the source IP at the firewall",
+            "Set AD account lockout thresholds (GPO: Account Lockout Policy)",
+            "Ensure all accounts have Kerberos pre-authentication ENABLED",
+            "Check for accounts with 'Do not require pre-auth' flag and fix them",
+        ],
+    },
+    "4776": {
+        "name": "NTLM Authentication Attempt",
+        "action": "The domain controller attempted to validate credentials via NTLM.",
+        "effect": "A spike may indicate pass-the-hash attacks or NTLM relay attacks in the environment.",
+        "severity": "High",
+        "mitre": "T1550.002 – Pass the Hash",
+        "remediation": [
+            "Restrict NTLM usage via GPO: Security Settings → Security Options → Network Security",
+            "Set 'Network Security: Restrict NTLM' policies to audit, then deny",
+            "Enable SMB signing to prevent NTLM relay: `Set-SmbServerConfiguration -RequireSecuritySignature $true`",
+            "Deploy Credential Guard on all workstations to prevent hash extraction",
+        ],
+    },
+    "1102": {
+        "name": "Audit Log Cleared",
+        "action": "The Security audit log was cleared.",
+        "effect": "ANY spike is critical — an attacker is actively destroying forensic evidence to cover tracks.",
+        "severity": "Critical",
+        "mitre": "T1070.001 – Clear Windows Event Logs",
+        "remediation": [
+            "CRITICAL: This is an active attack indicator — initiate incident response immediately",
+            "Forward all logs to a remote SIEM/syslog server to prevent local log destruction",
+            "Restrict log clearing rights — only SYSTEM should clear Security logs",
+            "GPO: Restrict 'Manage auditing and security log' to Admins only",
+            "Capture a forensic memory dump before rebooting: `winpmem_mini.exe memdump.raw`",
+        ],
+    },
+
+    # ── System Log ──
+    "7045": {
+        "name": "New Service Installed",
+        "action": "A new service was installed in the system.",
+        "effect": "A spike indicates mass service installation — common in malware persistence or remote access tool deployment.",
+        "severity": "Critical",
+        "mitre": "T1543.003 – Windows Service",
+        "remediation": [
+            "IMMEDIATE: List all services and identify newly created suspicious ones",
+            "Run: `Get-Service | Sort-Object Status` and `sc query type=service state=all`",
+            "Stop and disable malicious services: `sc stop <name> && sc config <name> start=disabled`",
+            "Check the service executable path — verify binary hash against VirusTotal",
+            "Restrict service creation to Administrators via GPO",
+        ],
+    },
+    "7036": {
+        "name": "Service State Changed",
+        "action": "A service entered the running or stopped state.",
+        "effect": "A spike may indicate services being rapidly toggled — possible defense evasion (disabling AV/firewall) or instability.",
+        "severity": "Medium",
+        "mitre": "T1562 – Impair Defenses",
+        "remediation": [
+            "Identify which services are being toggled and check if security tools (AV, firewall) are being stopped",
+            "Verify Windows Defender is running: `Get-MpComputerStatus`",
+            "Verify Windows Firewall: `Get-NetFirewallProfile | Select Name,Enabled`",
+            "Set critical services to 'Automatic' start and prevent manual stopping via GPO",
+        ],
+    },
+    "7040": {
+        "name": "Service Start Type Changed",
+        "action": "The start type of a service was changed (e.g., from Manual to Disabled).",
+        "effect": "A spike may indicate an attacker disabling security services or enabling malicious services for persistence.",
+        "severity": "High",
+        "mitre": "T1562.001 – Disable or Modify Tools",
+        "remediation": [
+            "Run: `sc qc <ServiceName>` on affected services to check their new start type",
+            "Restore security services to Automatic: `sc config WinDefend start=auto`",
+            "Enable tamper protection in Windows Security settings to prevent service modification",
+            "Restrict service configuration to Administrators only",
+        ],
+    },
+
+    # ── PowerShell / Sysmon ──
+    "4104": {
+        "name": "PowerShell Script Block Logged",
+        "action": "A PowerShell script block was executed and logged.",
+        "effect": "A spike indicates heavy script execution — potential fileless malware, obfuscated payloads, or automated attack scripts.",
+        "severity": "High",
+        "mitre": "T1059.001 – PowerShell",
+        "remediation": [
+            "Review the script block content in the event details for malicious commands",
+            "Set PowerShell execution policy: `Set-ExecutionPolicy AllSigned -Scope LocalMachine`",
+            "Enable Constrained Language Mode for non-admin users",
+            "Deploy AppLocker rules to restrict PowerShell to authorized scripts only",
+            "Check for encoded commands: look for `-enc` or `-EncodedCommand` in process args",
+        ],
+    },
+    "1": {
+        "name": "Sysmon – Process Creation",
+        "action": "Sysmon logged a new process creation with full command-line detail.",
+        "effect": "A spike indicates rapid process spawning — automated reconnaissance, payload delivery, or lateral movement tools.",
+        "severity": "Medium",
+        "mitre": "T1059 – Command and Scripting Interpreter",
+        "remediation": [
+            "Review the CommandLine field in Sysmon events for suspicious commands",
+            "Check for LOLBin abuse (certutil, mshta, regsvr32, rundll32, bitsadmin)",
+            "Create AppLocker rules to whitelist only approved executables",
+            "Investigate parent processes — suspicious chains like winword.exe → cmd.exe indicate exploits",
+        ],
+    },
+    "3": {
+        "name": "Sysmon – Network Connection",
+        "action": "Sysmon logged an outbound or inbound network connection.",
+        "effect": "A spike indicates mass network connections — possible C2 beaconing, port scanning, or data exfiltration.",
+        "severity": "High",
+        "mitre": "T1071 – Application Layer Protocol",
+        "remediation": [
+            "Identify destination IPs and check against threat intel (VirusTotal, AbuseIPDB)",
+            "Block suspicious outbound IPs at the firewall immediately",
+            "Check for beaconing patterns (regular-interval connections to same IP)",
+            "Run: `netstat -an | findstr ESTABLISHED` to list current active connections",
+            "Isolate the host if C2 communication is confirmed",
+        ],
+    },
+    "11": {
+        "name": "Sysmon – File Created",
+        "action": "Sysmon logged a file creation event.",
+        "effect": "A spike indicates mass file drops — possible malware deployment, ransomware payload staging, or data staging.",
+        "severity": "High",
+        "mitre": "T1105 – Ingress Tool Transfer",
+        "remediation": [
+            "Identify the directory where files are being created (Temp, Downloads, AppData are high-risk)",
+            "Scan newly created files with Windows Defender: `Start-MpScan -ScanType QuickScan`",
+            "Enable Controlled Folder Access to protect key directories from unauthorized writes",
+            "Check file extensions — watch for .exe, .dll, .ps1, .bat, .vbs drops in unusual locations",
+        ],
+    },
+    "13": {
+        "name": "Sysmon – Registry Value Set",
+        "action": "Sysmon logged a registry value being set.",
+        "effect": "A spike indicates mass registry modifications — potential persistence mechanisms (Run keys), defense evasion, or config tampering.",
+        "severity": "High",
+        "mitre": "T1547.001 – Registry Run Keys",
+        "remediation": [
+            "Check Run/RunOnce keys: `reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run`",
+            "Check user Run keys: `reg query HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run`",
+            "Remove unauthorized entries: `reg delete <key> /v <valuename> /f`",
+            "Deploy registry auditing via GPO for persistence-related keys",
+        ],
+    },
+
+    # ── Credential / Vault ──
+    "5379": {
+        "name": "Credential Manager Read",
+        "action": "Credential Manager credentials were read (vaulted passwords, tokens, or certificates were accessed).",
+        "effect": "A spike strongly indicates credential harvesting — an attacker or malware is systematically reading stored credentials from Windows Vault.",
+        "severity": "Critical",
+        "mitre": "T1555.004 – Windows Credential Manager",
+        "remediation": [
+            "IMMEDIATE: Identify which process is reading credentials — check the SubjectLogonId in event",
+            "Rotate ALL passwords stored in Windows Credential Manager on this machine",
+            "Run: `cmdkey /list` to see currently stored credentials, then `cmdkey /delete:<target>` to remove",
+            "Clear the Windows Vault: Control Panel → Credential Manager → Remove all stored credentials",
+            "Deploy Credential Guard to protect credential storage: enable via GPO or DISM",
+            "Scan the machine for credential-stealing malware (Mimikatz, LaZagne, etc.)",
+        ],
+    },
+    "5376": {
+        "name": "Credential Manager Backup",
+        "action": "Credential Manager credentials were backed up.",
+        "effect": "A spike indicates credential exfiltration — an attacker is backing up the credential vault for offline extraction.",
+        "severity": "Critical",
+        "mitre": "T1555 – Credentials from Password Stores",
+        "remediation": [
+            "CRITICAL: This is active credential theft — initiate incident response",
+            "Identify the user/process that triggered the backup",
+            "Rotate ALL credentials stored in Credential Manager on this and connected machines",
+            "Check for DPAPI master key extraction attempts alongside this event",
+            "Isolate the machine from the network immediately",
+        ],
+    },
+
+    # ── Windows Defender ──
+    "1116": {
+        "name": "Defender Malware Detected",
+        "action": "Windows Defender detected malware or potentially unwanted software.",
+        "effect": "A spike indicates active malware infection with multiple detections — possible worm propagation or multi-stage payload.",
+        "severity": "Critical",
+        "mitre": "N/A",
+        "remediation": [
+            "Run a full system scan: `Start-MpScan -ScanType FullScan`",
+            "Update definitions first: `Update-MpSignature`",
+            "Check threat details: `Get-MpThreatDetection` — note the file paths",
+            "Quarantine or isolate the infected machine from the network",
+            "Check if malware spread to other endpoints via shared drives or lateral movement",
+        ],
+    },
+    "1117": {
+        "name": "Defender Action Taken",
+        "action": "Windows Defender took action against malware.",
+        "effect": "A spike alongside 1116 means Defender is actively fighting an infection. Verify all threats were successfully remediated.",
+        "severity": "High",
+        "mitre": "N/A",
+        "remediation": [
+            "Verify all threats were cleaned: `Get-MpThreat` — check ThreatStatusID (1=Cleaned)",
+            "Check quarantine: `Get-MpThreatDetection | Where ThreatStatusID -ne 1`",
+            "Run a verification scan after remediation: `Start-MpScan -ScanType QuickScan`",
+            "If threats persist, boot into Safe Mode and run offline scan",
+        ],
+    },
+    "5001": {
+        "name": "Defender Real-Time Protection Disabled",
+        "action": "Real-time protection was disabled.",
+        "effect": "ANY occurrence is suspicious — an attacker may have disabled Defender to execute payloads undetected.",
+        "severity": "Critical",
+        "mitre": "T1562.001 – Disable or Modify Tools",
+        "remediation": [
+            "IMMEDIATE: Re-enable real-time protection: `Set-MpPreference -DisableRealtimeMonitoring $false`",
+            "Enable Tamper Protection: Windows Security → Virus & Threat Protection → Tamper Protection ON",
+            "Check who/what disabled it — review surrounding events for process execution (EID 4688)",
+            "Enforce via GPO: Computer Config → Admin Templates → Windows Defender → Real-time Protection → Enable",
+        ],
+    },
+
+    # ── Task Scheduler ──
+    "106": {
+        "name": "Task Registered",
+        "action": "A new scheduled task was registered.",
+        "effect": "A spike indicates mass persistence — multiple tasks being registered for command execution or payload delivery.",
+        "severity": "High",
+        "mitre": "T1053.005 – Scheduled Task",
+        "remediation": [
+            "Enumerate all tasks: `schtasks /query /fo LIST /v`",
+            "Identify recently created tasks and verify their legitimacy",
+            "Delete unauthorized tasks: `schtasks /delete /tn <TaskName> /f`",
+            "Restrict task creation via GPO: User Rights Assignment",
+        ],
+    },
+    "200": {
+        "name": "Task Executed",
+        "action": "A scheduled task action was executed.",
+        "effect": "A spike means rapid task execution — could be an attacker's persistence mechanism actively running malicious commands.",
+        "severity": "Medium",
+        "mitre": "T1053.005 – Scheduled Task",
+        "remediation": [
+            "Review which tasks ran and their action command lines",
+            "Run: `schtasks /query /tn <TaskName> /fo LIST /v` to see task details",
+            "Check the Last Run Result column for tasks that executed unexpected binaries",
+            "Disable suspicious tasks: `schtasks /change /tn <TaskName> /disable`",
+        ],
+    },
+}
+
+
+def get_event_info(event_id):
+    """
+    Look up Event ID details. Returns a dict with name, action, effect,
+    severity, mitre mapping, and remediation steps.
+    """
+    eid = str(event_id).strip()
+    if eid in EVENT_ID_INFO:
+        return EVENT_ID_INFO[eid]
+    return {
+        "name": f"Event ID {eid}",
+        "action": "This Windows event was logged by the operating system.",
+        "effect": "An unusual frequency spike for this event warrants manual investigation to determine if it correlates with suspicious activity.",
+        "severity": "Unknown",
+        "mitre": "N/A",
+        "remediation": [
+            "Investigate the event in Event Viewer for context and details",
+            "Run: `Get-WinEvent -FilterHashtable @{Id=" + eid + "} -MaxEvents 20 | Format-List` to review recent occurrences",
+            "Cross-reference with other anomalous events for correlation",
+            "Consult Microsoft documentation for Event ID " + eid + " to understand its meaning",
+        ],
+    }
