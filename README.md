@@ -1,5 +1,4 @@
 <div align="center">
-  <img src="Sourcecode/background/bg_minimal.png" alt="Overwatch-APT Logo" width="200" style="border-radius: 50%; border: 2px solid #8B0000;"/>
   <h1>🛡️ Overwatch-APT</h1>
   <p><strong>Advanced Threat Detection & Live APT Hunting Engine</strong></p>
 
